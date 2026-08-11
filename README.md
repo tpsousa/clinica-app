@@ -2,8 +2,6 @@
 
 Sistema de gestão de clínica médica — agenda, pacientes, profissionais e consultas.
 
-Nasceu de um projeto pessoal de agenda médica em Flask/Python, migrado pra um stack mais alinhado com o mercado (Node/TS + React + PostgreSQL).
-
 ## Stack
 
 - **Back-end:** Node.js + TypeScript + Express
