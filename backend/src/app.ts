@@ -6,6 +6,7 @@ import cors from "cors";
 import { authRoutes } from "./modules/auth/auth.routes";
 import { profissionaisRoutes } from "./modules/profissionais/profissionais.routes";
 import { pacientesRoutes } from "./modules/pacientes/paciente.routes";
+import { consultasRoutes } from "./modules/consultas/consultas.routes";
 
 export const app = express();
 
@@ -20,3 +21,5 @@ app.use("/api/auth", authRoutes);
 app.use("/api/profissionais", profissionaisRoutes);
 
 app.use("/api/pacientes", pacientesRoutes);
+
+app.use("/api/consultas", consultasRoutes);

@@ -118,6 +118,3 @@ Rotas protegidas exigem header `Authorization: Bearer <token>`.
 - [ ] Controle de permissão por role no front (admin / recepção / médico)
 - [ ] Deploy
 
-## Licença
-
-Projeto pessoal / portfólio.
