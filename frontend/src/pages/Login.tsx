@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
+import { api } from "../services/api";
 import "./Login.css";
 
 interface AppointmentSlot {
@@ -8,8 +9,8 @@ interface AppointmentSlot {
   specialty: string;
 }
 
-// Dado de exemplo apenas para animar o painel — troque por uma chamada
-// real (ex: GET /api/agenda/proximos) quando a API estiver pronta.
+// Dado de exemplo apenas para animar o painel — pode trocar depois por
+// uma chamada real (ex: GET /api/consultas) se quiser dados de verdade aqui.
 const UPCOMING_SLOTS: AppointmentSlot[] = [
   { time: "08:30", patient: "Dra. Ana Ramos", specialty: "Cardiologia" },
   { time: "09:00", patient: "Dr. Bruno Costa", specialty: "Ortopedia" },
@@ -54,19 +55,9 @@ export default function Login() {
 
     setLoading(true);
     try {
-      // Ajuste a URL para o endpoint real do seu back-end Node/Express.
-      const res = await fetch("/api/auth/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
-      });
-
-      if (!res.ok) {
-        throw new Error("Credenciais inválidas.");
-      }
-
-      const data = await res.json();
+      const data = await api.login(email, password);
       localStorage.setItem("token", data.token);
+      localStorage.setItem("usuario", JSON.stringify(data.usuario));
       window.location.href = "/agenda";
     } catch (err) {
       setError(

@@ -1,0 +1,14 @@
+FROM node:20-alpine
+
+WORKDIR /app
+
+COPY package*.json ./
+RUN npm install
+
+COPY . .
+
+EXPOSE 5173
+
+# --host é obrigatório: sem isso o Vite só escuta dentro do container
+# e o navegador (fora do container) não consegue acessar.
+CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0"]

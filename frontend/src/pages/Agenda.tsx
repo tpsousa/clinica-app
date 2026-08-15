@@ -1,21 +1,17 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
+import { api } from "../services/api";
+import type { Profissional, ConsultaApi, BackendStatus } from "../services/api";
 import "./Agenda.css";
 
 type Status = "agendada" | "confirmada" | "realizada" | "cancelada" | "falta";
-
-interface Professional {
-  id: string;
-  name: string;
-  specialty: string;
-}
 
 interface Appointment {
   id: string;
   professionalId: string;
   patientName: string;
-  time: string; // "HH:MM"
-  duration: number; // minutos
+  time: string;
+  duration: number;
   status: Status;
 }
 
@@ -26,23 +22,6 @@ interface FormState {
   duration: number;
   status: Status;
 }
-
-// Troque por uma chamada real (ex: GET /api/profissionais) quando a API estiver pronta.
-const PROFESSIONALS: Professional[] = [
-  { id: "p1", name: "Dra. Ana Ramos", specialty: "Cardiologia" },
-  { id: "p2", name: "Dr. Bruno Costa", specialty: "Ortopedia" },
-  { id: "p3", name: "Dra. Carla Nunes", specialty: "Pediatria" },
-];
-
-// Troque por uma chamada real (ex: GET /api/consultas?data=...) quando a API estiver pronta.
-const INITIAL_APPOINTMENTS: Appointment[] = [
-  { id: "a1", professionalId: "p1", patientName: "Marcos Vieira", time: "08:30", duration: 30, status: "confirmada" },
-  { id: "a2", professionalId: "p1", patientName: "Sueli Amaral", time: "09:30", duration: 30, status: "agendada" },
-  { id: "a3", professionalId: "p2", patientName: "Renato Lima", time: "09:00", duration: 60, status: "confirmada" },
-  { id: "a4", professionalId: "p2", patientName: "Ivone Prado", time: "11:00", duration: 30, status: "falta" },
-  { id: "a5", professionalId: "p3", patientName: "Beatriz Sales", time: "10:00", duration: 30, status: "realizada" },
-  { id: "a6", professionalId: "p3", patientName: "João Pedro", time: "14:00", duration: 30, status: "cancelada" },
-];
 
 const START_HOUR = 8;
 const END_HOUR = 19;
@@ -71,6 +50,18 @@ function timeToSlotIndex(time: string): number {
   return ((hour - START_HOUR) * 60 + minute) / SLOT_MINUTES;
 }
 
+function formatDateISO(date: Date): string {
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
+function toFrontStatus(status: BackendStatus): Status {
+  return status.toLowerCase() as Status;
+}
+
+function toBackendStatus(status: Status): BackendStatus {
+  return status.toUpperCase() as BackendStatus;
+}
+
 const TIME_SLOTS = Array.from({ length: TOTAL_SLOTS }, (_, i) => {
   const label = slotIndexToTime(i);
   return { index: i, label, isHour: label.endsWith(":00") };
@@ -78,28 +69,63 @@ const TIME_SLOTS = Array.from({ length: TOTAL_SLOTS }, (_, i) => {
 
 const DURATION_OPTIONS = [15, 30, 45, 60];
 
-function createId(): string {
-  return `a${Date.now()}${Math.floor(Math.random() * 1000)}`;
-}
-
 const EMPTY_FORM: FormState = {
   patientName: "",
-  professionalId: PROFESSIONALS[0].id,
+  professionalId: "",
   time: "08:00",
   duration: 30,
   status: "agendada",
 };
 
 export default function Agenda() {
-  const [appointments, setAppointments] = useState<Appointment[]>(INITIAL_APPOINTMENTS);
-  const [visibleIds, setVisibleIds] = useState<Set<string>>(new Set(PROFESSIONALS.map((p) => p.id)));
+  const [professionals, setProfessionals] = useState<Profissional[]>([]);
+  const [appointments, setAppointments] = useState<Appointment[]>([]);
+  const [visibleIds, setVisibleIds] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState("");
   const [selectedDate, setSelectedDate] = useState(new Date());
+
+  const [loadingProfessionals, setLoadingProfessionals] = useState(true);
+  const [loadingAppointments, setLoadingAppointments] = useState(true);
+  const [pageError, setPageError] = useState<string | null>(null);
+
   const [modalOpen, setModalOpen] = useState(false);
+  const [modalError, setModalError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
 
-  const visibleProfessionals = PROFESSIONALS.filter((p) => visibleIds.has(p.id));
+  // Busca a lista de profissionais uma única vez.
+  useEffect(() => {
+    api
+      .listarProfissionais()
+      .then((data) => {
+        setProfessionals(data);
+        setVisibleIds(new Set(data.map((p) => p.id)));
+      })
+      .catch((err) => setPageError(err instanceof Error ? err.message : "Erro ao carregar profissionais."))
+      .finally(() => setLoadingProfessionals(false));
+  }, []);
+
+  // Busca as consultas sempre que o dia selecionado muda.
+  useEffect(() => {
+    const dataISO = formatDateISO(selectedDate);
+    setLoadingAppointments(true);
+    api
+      .listarConsultas(dataISO)
+      .then((data: ConsultaApi[]) =>
+        setAppointments(data.map((a) => ({ ...a, status: toFrontStatus(a.status) })))
+      )
+      .catch((err) => setPageError(err instanceof Error ? err.message : "Erro ao carregar consultas."))
+      .finally(() => setLoadingAppointments(false));
+  }, [selectedDate]);
+
+  async function refetchAppointments() {
+    const dataISO = formatDateISO(selectedDate);
+    const data = await api.listarConsultas(dataISO);
+    setAppointments(data.map((a) => ({ ...a, status: toFrontStatus(a.status) })));
+  }
+
+  const visibleProfessionals = professionals.filter((p) => visibleIds.has(p.id));
 
   const occupied = useMemo(() => {
     const map = new Map<string, Set<number>>();
@@ -125,9 +151,10 @@ export default function Agenda() {
 
   function openCreateModal(professionalId?: string, time?: string) {
     setEditingId(null);
+    setModalError(null);
     setForm({
       ...EMPTY_FORM,
-      professionalId: professionalId ?? PROFESSIONALS[0].id,
+      professionalId: professionalId ?? professionals[0]?.id ?? "",
       time: time ?? "08:00",
     });
     setModalOpen(true);
@@ -135,6 +162,7 @@ export default function Agenda() {
 
   function openEditModal(appt: Appointment) {
     setEditingId(appt.id);
+    setModalError(null);
     setForm({
       patientName: appt.patientName,
       professionalId: appt.professionalId,
@@ -148,26 +176,52 @@ export default function Agenda() {
   function closeModal() {
     setModalOpen(false);
     setEditingId(null);
+    setModalError(null);
   }
 
-  function handleSubmit(e: FormEvent) {
+  async function handleSubmit(e: FormEvent) {
     e.preventDefault();
-    if (!form.patientName.trim()) return;
+    if (!form.patientName.trim() || !form.professionalId) return;
 
-    if (editingId) {
-      setAppointments((prev) =>
-        prev.map((a) => (a.id === editingId ? { ...a, ...form } : a))
-      );
-    } else {
-      setAppointments((prev) => [...prev, { id: createId(), ...form }]);
+    setSaving(true);
+    setModalError(null);
+
+    const payload = {
+      patientName: form.patientName,
+      professionalId: form.professionalId,
+      time: form.time,
+      data: formatDateISO(selectedDate),
+      duration: form.duration,
+      status: toBackendStatus(form.status),
+    };
+
+    try {
+      if (editingId) {
+        await api.atualizarConsulta(editingId, payload);
+      } else {
+        await api.criarConsulta(payload);
+      }
+      await refetchAppointments();
+      closeModal();
+    } catch (err) {
+      setModalError(err instanceof Error ? err.message : "Não foi possível salvar.");
+    } finally {
+      setSaving(false);
     }
-    closeModal();
   }
 
-  function handleDelete() {
+  async function handleDelete() {
     if (!editingId) return;
-    setAppointments((prev) => prev.filter((a) => a.id !== editingId));
-    closeModal();
+    setSaving(true);
+    try {
+      await api.excluirConsulta(editingId);
+      await refetchAppointments();
+      closeModal();
+    } catch (err) {
+      setModalError(err instanceof Error ? err.message : "Não foi possível excluir.");
+    } finally {
+      setSaving(false);
+    }
   }
 
   function shiftDate(days: number) {
@@ -185,13 +239,18 @@ export default function Agenda() {
   });
 
   const searchTerm = search.trim().toLowerCase();
+  const isLoading = loadingProfessionals || loadingAppointments;
 
   return (
     <div className="agenda-screen">
       <header className="agenda-header">
         <div className="agenda-title-row">
           <h1 className="agenda-title">Agenda</h1>
-          <button className="new-appointment-button" onClick={() => openCreateModal()}>
+          <button
+            className="new-appointment-button"
+            onClick={() => openCreateModal()}
+            disabled={professionals.length === 0}
+          >
             Nova consulta
           </button>
         </div>
@@ -220,7 +279,7 @@ export default function Agenda() {
         </div>
 
         <div className="professional-filters">
-          {PROFESSIONALS.map((p) => (
+          {professionals.map((p) => (
             <button
               key={p.id}
               className={`professional-chip ${visibleIds.has(p.id) ? "is-active" : ""}`}
@@ -241,74 +300,80 @@ export default function Agenda() {
         </div>
       </header>
 
-      <div className="agenda-grid-wrapper">
-        <div
-          className="agenda-grid"
-          style={{
-            gridTemplateColumns: `64px repeat(${visibleProfessionals.length}, minmax(180px, 1fr))`,
-          }}
-        >
-          <div className="grid-corner" style={{ gridColumn: 1, gridRow: 1 }} />
+      {pageError && <p className="form-error">{pageError}</p>}
 
-          {visibleProfessionals.map((p, colIdx) => (
-            <div className="column-header" key={p.id} style={{ gridColumn: colIdx + 2, gridRow: 1 }}>
-              <span className="column-header-name">{p.name}</span>
-              <span className="column-header-specialty">{p.specialty}</span>
-            </div>
-          ))}
+      {isLoading ? (
+        <p className="agenda-loading">Carregando agenda…</p>
+      ) : (
+        <div className="agenda-grid-wrapper">
+          <div
+            className="agenda-grid"
+            style={{
+              gridTemplateColumns: `64px repeat(${visibleProfessionals.length}, minmax(180px, 1fr))`,
+            }}
+          >
+            <div className="grid-corner" style={{ gridColumn: 1, gridRow: 1 }} />
 
-          {TIME_SLOTS.map((slot) => (
-            <div
-              key={slot.index}
-              className={`time-label ${slot.isHour ? "is-hour" : ""}`}
-              style={{ gridColumn: 1, gridRow: slot.index + 2 }}
-            >
-              {slot.isHour ? slot.label : ""}
-            </div>
-          ))}
+            {visibleProfessionals.map((p, colIdx) => (
+              <div className="column-header" key={p.id} style={{ gridColumn: colIdx + 2, gridRow: 1 }}>
+                <span className="column-header-name">{p.name}</span>
+                <span className="column-header-specialty">{p.specialty}</span>
+              </div>
+            ))}
 
-          {visibleProfessionals.map((p, colIdx) =>
-            TIME_SLOTS.map((slot) => {
-              const isOccupied = occupied.get(p.id)?.has(slot.index);
-              if (isOccupied) return null;
+            {TIME_SLOTS.map((slot) => (
+              <div
+                key={slot.index}
+                className={`time-label ${slot.isHour ? "is-hour" : ""}`}
+                style={{ gridColumn: 1, gridRow: slot.index + 2 }}
+              >
+                {slot.isHour ? slot.label : ""}
+              </div>
+            ))}
+
+            {visibleProfessionals.map((p, colIdx) =>
+              TIME_SLOTS.map((slot) => {
+                const isOccupied = occupied.get(p.id)?.has(slot.index);
+                if (isOccupied) return null;
+                return (
+                  <button
+                    key={`${p.id}-${slot.index}`}
+                    className="empty-slot"
+                    style={{ gridColumn: colIdx + 2, gridRow: slot.index + 2 }}
+                    onClick={() => openCreateModal(p.id, slot.label)}
+                    aria-label={`Agendar consulta às ${slot.label} com ${p.name}`}
+                  />
+                );
+              })
+            )}
+
+            {appointments.map((appt) => {
+              const colIdx = visibleProfessionals.findIndex((p) => p.id === appt.professionalId);
+              if (colIdx === -1) return null;
+              const start = timeToSlotIndex(appt.time);
+              const span = Math.max(1, appt.duration / SLOT_MINUTES);
+              const dimmed =
+                searchTerm.length > 0 && !appt.patientName.toLowerCase().includes(searchTerm);
+
               return (
                 <button
-                  key={`${p.id}-${slot.index}`}
-                  className="empty-slot"
-                  style={{ gridColumn: colIdx + 2, gridRow: slot.index + 2 }}
-                  onClick={() => openCreateModal(p.id, slot.label)}
-                  aria-label={`Agendar consulta às ${slot.label} com ${p.name}`}
-                />
+                  key={appt.id}
+                  className={`appointment-card status--${appt.status} ${dimmed ? "is-dimmed" : ""}`}
+                  style={{
+                    gridColumn: colIdx + 2,
+                    gridRow: `${start + 2} / span ${span}`,
+                  }}
+                  onClick={() => openEditModal(appt)}
+                >
+                  <span className="card-time">{appt.time}</span>
+                  <span className="card-patient">{appt.patientName}</span>
+                  <span className="card-status">{STATUS_LABEL[appt.status]}</span>
+                </button>
               );
-            })
-          )}
-
-          {appointments.map((appt) => {
-            const colIdx = visibleProfessionals.findIndex((p) => p.id === appt.professionalId);
-            if (colIdx === -1) return null;
-            const start = timeToSlotIndex(appt.time);
-            const span = Math.max(1, appt.duration / SLOT_MINUTES);
-            const dimmed =
-              searchTerm.length > 0 && !appt.patientName.toLowerCase().includes(searchTerm);
-
-            return (
-              <button
-                key={appt.id}
-                className={`appointment-card status--${appt.status} ${dimmed ? "is-dimmed" : ""}`}
-                style={{
-                  gridColumn: colIdx + 2,
-                  gridRow: `${start + 2} / span ${span}`,
-                }}
-                onClick={() => openEditModal(appt)}
-              >
-                <span className="card-time">{appt.time}</span>
-                <span className="card-patient">{appt.patientName}</span>
-                <span className="card-status">{STATUS_LABEL[appt.status]}</span>
-              </button>
-            );
-          })}
+            })}
+          </div>
         </div>
-      </div>
+      )}
 
       {modalOpen && (
         <div className="modal-overlay" onClick={closeModal}>
@@ -335,7 +400,7 @@ export default function Agenda() {
                   value={form.professionalId}
                   onChange={(e) => setForm({ ...form, professionalId: e.target.value })}
                 >
-                  {PROFESSIONALS.map((p) => (
+                  {professionals.map((p) => (
                     <option key={p.id} value={p.id}>
                       {p.name} — {p.specialty}
                     </option>
@@ -392,18 +457,24 @@ export default function Agenda() {
                 </label>
               )}
 
+              {modalError && (
+                <p className="form-error" role="alert">
+                  {modalError}
+                </p>
+              )}
+
               <div className="modal-actions">
                 {editingId && (
-                  <button type="button" className="modal-delete" onClick={handleDelete}>
+                  <button type="button" className="modal-delete" onClick={handleDelete} disabled={saving}>
                     Excluir
                   </button>
                 )}
                 <div className="modal-actions-right">
-                  <button type="button" className="modal-cancel" onClick={closeModal}>
+                  <button type="button" className="modal-cancel" onClick={closeModal} disabled={saving}>
                     Cancelar
                   </button>
-                  <button type="submit" className="modal-save">
-                    Salvar
+                  <button type="submit" className="modal-save" disabled={saving}>
+                    {saving ? "Salvando…" : "Salvar"}
                   </button>
                 </div>
               </div>
