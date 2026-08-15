@@ -8,9 +8,46 @@ services:
       POSTGRES_PASSWORD: clinica
       POSTGRES_DB: clinica_db
     ports:
-      - "5433:5432"
+      - "5432:5432"
     volumes:
       - clinica_pg_data:/var/lib/postgresql/data
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.dev
+    container_name: clinica-backend
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      # Dentro da rede do Docker, o host do banco é o NOME DO SERVIÇO
+      # ("postgres"), não "localhost" — os containers se enxergam pelo nome.
+      DATABASE_URL: postgresql://clinica:clinica@postgres:5432/clinica_db?schema=public
+      JWT_SECRET: ${JWT_SECRET:-troque-por-um-segredo-forte-aqui}
+      PORT: 3000
+    volumes:
+      - ./backend/src:/app/src
+      - ./backend/prisma:/app/prisma
+    depends_on:
+      - postgres
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    container_name: clinica-frontend
+    restart: unless-stopped
+    ports:
+      - "5173:5173"
+    environment:
+      # Esse aqui roda no navegador do usuário, então continua "localhost"
+      # (o navegador não conhece os nomes dos serviços do Docker).
+      VITE_API_URL: http://localhost:3000
+    volumes:
+      - ./frontend/src:/app/src
+    depends_on:
+      - backend
 
 volumes:
   clinica_pg_data:
